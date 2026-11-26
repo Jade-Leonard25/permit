@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Token & API Tester</title>
+  <style>
+    * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    body { margin: 0; padding: 24px; background: #0f172a; color: #e2e8f0; }
+    .container { max-width: 760px; margin: 0 auto; display: grid; gap: 16px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px; }
+    h1, h2 { margin: 0 0 12px; font-size: 18px; }
+    h2 { font-size: 15px; color: #93c5fd; }
+    label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+    input {
+      width: 100%; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #475569; background: #0f172a; color: #f8fafc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    button {
+      padding: 10px 14px; border-radius: 8px; border: 0; cursor: pointer;
+      font-weight: 600; font-size: 13px; background: #2563eb; color: white;
+    }
+    button.secondary { background: #334155; color: #e2e8f0; }
+    button:hover { opacity: 0.92; }
+    .badge {
+      display: inline-block; padding: 4px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 700; margin-left: 8px; background: #334155; color: #cbd5e1;
+    }
+    .badge.ok { background: #14532d; color: #86efac; }
+    .badge.err { background: #7f1d1d; color: #fca5a5; }
+    pre {
+      margin: 12px 0 0; padding: 12px; border-radius: 8px;
+      background: #020617; color: #e2e8f0; overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+      border: 1px solid #1e293b;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Admin Token Tester <span id="statusBadge" class="badge">READY</span></h1>
+
+      <label for="baseUrl">Server Base URL</label>
+      <input id="baseUrl" type="text" value="http://localhost:8080" />
+
+      <div style="margin-top: 12px;">
+        <label for="adminToken">ADMIN_API_TOKEN (sent as X-Admin-Token)</label>
+        <input id="adminToken" type="text" value="ffdbcdb2e3edf270ce6c6b1c53102b2cde4b3b044e7bd606" />
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="userId">Test user_id</label>
+          <input id="userId" type="text" value="usr_test_001" />
+        </div>
+        <div>
+          <label for="keyName">Test key name</label>
+          <input id="keyName" type="text" value="browser-auth-check" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="testAuthBtn">Test Auth (POST /admin/keys)</button>
+        <button id="testHealthBtn" class="secondary">Check /health</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Optional: Test Generated Bearer Key on /v1/search</h2>
+      <label for="bearerKey">Generated Bearer API Key (rk_live_...)</label>
+      <input id="bearerKey" type="text" placeholder="Auto-filled after POST /admin/keys succeeds, or paste one here" />
+
+      <div style="margin-top: 12px;">
+        <label for="searchQuery">Search query (q)</label>
+        <input id="searchQuery" type="text" value="accounting" />
+      </div>
+
+      <div class="actions">
+        <button id="testSearchBtn" class="secondary">Test GET /v1/search</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Response</h2>
+      <pre id="output">Click "Test Auth (POST /admin/keys)" to verify your ADMIN_API_TOKEN.</pre>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setBadge(text, type = "") {
+      const badge = $("statusBadge");
+      badge.textContent = text;
+      badge.className = "badge" + (type ? " " + type : "");
+    }
+
+    function showOutput(obj) {
+      $("output").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+    }
+
+    function getBaseUrl() {
+      return $("baseUrl").value.trim().replace(/\/+$/, "");
+    }
+
+    $("testHealthBtn").addEventListener("click", async () => {
+      try {
+        const res = await fetch(`${getBaseUrl()}/health`);
+        const data = await res.json();
+        setBadge(`${res.status} ${res.statusText}`, res.ok ? "ok" : "err");
+        showOutput({ status: res.status, body: data });
+      } catch (err) {
+        setBadge("NETWORK ERROR", "err");
+        showOutput({ error: err.message, hint: "Is your Go server running and allowing browser requests (CORS)?" });
+      }
+    });
+
+    $("testAuthBtn").addEventListener("click", async () => {
+      const token = $("adminToken").value.trim();
+      const payload = {
+        user_id: $("userId").value.trim() || "usr_test_001",
+        name: $("keyName").value.trim() || "browser-auth-check",
+        monthly_limit: 250
+      };
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/admin/keys`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Token": token
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const text = await res.text();
+        let parsed = text;
+        try { parsed = JSON.parse(text); } catch (_) {}
+
+        if (res.status === 201) {
+          setBadge("AUTH VALID (201)", "ok");
+          if (parsed && parsed.api_key) {
+            $("bearerKey").value = parsed.api_key;
+          }
+        } else if (res.status === 401) {
+          setBadge("UNAUTHORIZED (401)", "err");
+        } else {
+          setBadge(`HTTP ${res.status}`, res.ok ? "ok" : "err");
+        }
+
+        showOutput({ status: res.status, ok: res.ok, body: parsed });
+      } catch (err) {
+        setBadge("FETCH FAILED", "err");
+        showOutput({
+          error: err.message,
+          hint: "If opening from file://, check if your Go server has CORS headers enabled or test via curl."
+        });
+      }
+    });
+
+    $("testSearchBtn").addEventListener("click", async () => {
+      const key = $("bearerKey").value.trim();
+      const q = encodeURIComponent($("searchQuery").value.trim() || "accounting");
+      if (!key) {
+        setBadge("MISSING KEY", "err");
+        showOutput({ error: "Enter or generate an rk_live_... API key first." });
+        return;
+      }
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/v1/search?q=${q}&limit=3`, {
+          headers: {
+            "Authorization": `Bearer ${key}`
+          }
+        });
+        const data = await res.json();
+        setBadge(`SEARCH ${res.status}`, res.ok ? "ok" : "err");
+        showOutput({ status: res.status, body: data });
+      } catch (err) {
+        setBadge("FETCH FAILED", "err");
+        showOutput({ error: err.message });
+      }
+    });
+  </script>
+</body>
+</html>
